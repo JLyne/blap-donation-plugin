@@ -5,6 +5,7 @@ Sourcemod plugin for Blap Summer Jam 2019. Displays donation total ingame among 
 
 * Ingame donation total displays. Shown above objectives and next to resupplies by default, but can be added to any entity with custom positioning, rotation and size
 * Supports amounts from $1 to $9999999
+* Donations above $25, $50, $100 and which cross $x000, have their own effects and spawned props
 * Blap medals replacing EOTL ducks
 * Blap reskinned control points
 
