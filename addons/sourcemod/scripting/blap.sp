@@ -9,20 +9,19 @@
 #pragma newdecls required
 #pragma semicolon 1
 
-#define PLUGIN_VERSION "1.1"
+#define PLUGIN_VERSION "1.0"
 #define HOLOGRAM_MODEL "models/blap19/cappoint_hologram.mdl"
 #define COINS_MODEL "models/blap19/coins/coins.mdl"
 #define NOTES_MODEL "models/blap19/notes/notes.mdl"
 
-#define _DEBUG true
 #define NO_SOCKET true
 #define FALLBACK_URL "https://blapbash.broadcast.tf/api/json_totals"
 
 public Plugin myinfo = 
 {
-	name = "Blap stuff",
+	name = "Blap 19 stuff",
 	author = "Jim",
-	description = "Server blapification",
+	description = "Ingame donation totals and reskinning for blap summer jam 2019",
 	version = PLUGIN_VERSION,
 	url = "http://steamcommunity.com/id/_NiGHTS/"
 };
@@ -43,8 +42,8 @@ enum DonationDisplay {
 enum ConfigEntry {
 	String:CETargetname[64], //Entity targetname
 	bool:CERegex, //Whether the targetname is a regex
-	bool:CEHide, 
-	bool:CENoProps,
+	bool:CEHide, //Whether to prevent creation of default donation displays
+	bool:CENoProps,//Whether to suppress prop spawns
 	Float:CEScale, //Digit sprite scale
 	Float:CEPosition[3], //Position relative to entity center
 	Float:CERotation[3], //Rotation relative to entity angles
@@ -66,10 +65,10 @@ enum EntityType {
 
 enum MilestoneType {
 	MilestoneType_None = 0,
-	MilestoneType_1k = 1,
-	MilestoneType_25 = 2,
-	MilestoneType_50 = 3,
-	MilestoneType_100 = 4,
+	MilestoneType_1k = 1, //x000 total reached
+	MilestoneType_25 = 2, //>=$25 donated at once
+	MilestoneType_50 = 3, //>=$50 donated at once
+	MilestoneType_100 = 4, //>=$100 donated at once
 }
 
 enum PropSpawnType {
@@ -96,6 +95,7 @@ ArrayList gDonationDisplays;
 StringMap gConfigEntries;
 ArrayList gConfigRegexes;
 
+//Cvars
 ConVar gTFDucksCvar;
 ConVar gDucksCvar;
 ConVar gCPsCvar;
@@ -121,13 +121,13 @@ public void OnPluginStart() {
 
 	RegAdminCmd("sm_reloadblap", Command_Reloadblap, ADMFLAG_GENERIC);
 	RegAdminCmd("sm_setdonationtotal", Command_SetDonationTotal, ADMFLAG_GENERIC);
-	RegAdminCmd("sm_testcoins", Command_TestCoins, ADMFLAG_GENERIC);
 
 	gDuckModels = new ArrayList(ByteCountToCells(PLATFORM_MAX_PATH));
 	gDonationDisplays = new ArrayList(view_as<int>(DonationDisplay));
 	gConfigEntries = new StringMap();
 	gConfigRegexes = new ArrayList(view_as<int>(ConfigRegex));
 
+	//Possible duck models
 	gDuckModels.PushString("models/blap19/ducks/bonus_blap.mdl");
 	gDuckModels.PushString("models/blap19/ducks/bonus_blap_2.mdl");
 	gDuckModels.PushString("models/blap19/ducks/bonus_blap_3.mdl");
@@ -212,21 +212,6 @@ public Action Command_SetDonationTotal(int client, int args) {
 	gDonationTotal = total;
 	UpdateDonationDisplays();
 	ReplyToCommand(client, "[SM] Total updated");
-
-	return Plugin_Handled;
-}
-
-public Action Command_TestCoins(int client, int args) {
-	ReplyToCommand(client, "[SM] Test coins created");
-	
-
-	for(int i = 0; i < gDonationDisplays.Length; i++) {
-		DonationDisplay entity[DonationDisplay];
-
-		gDonationDisplays.GetArray(i, entity[0], view_as<int>(DonationDisplay));
-
-		SpawnProp(entity, PropSpawnType_Coins);
-	}
 
 	return Plugin_Handled;
 }
@@ -544,6 +529,7 @@ void DestroyDonationDisplays() {
 	gDonationDisplays.Clear();
 }
 
+//Set control point model to reskinned version
 void PrepareControlPoint(int entity) {
 	entity = EntRefToEntIndex(entity);
 
@@ -555,6 +541,7 @@ void PrepareControlPoint(int entity) {
 	}
 }
 
+//Set flag model to money
 void PrepareFlag(int entity) {
 	SetEntityModel(entity, "models/items/currencypack_large.mdl");
 
@@ -685,7 +672,7 @@ public int UpdateDonationDisplays() {
 
 public int HandleMilestone(MilestoneType milestone, DonationDisplay display[DonationDisplay]) {
 	switch(milestone) {
-		case MilestoneType_1k:
+		case MilestoneType_1k: //Play tf_birthday sound and spawn confetti
 		{
 			if(gSoundsCvar.BoolValue) {
 				char sound[PLATFORM_MAX_PATH];
@@ -697,7 +684,7 @@ public int HandleMilestone(MilestoneType milestone, DonationDisplay display[Dona
 			TE_Particle("bday_confetti", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display[DDDigits][1]);
 		}
 
-		case MilestoneType_100:
+		case MilestoneType_100: //Play horn/cheers and spawn coins/notes
 		{
 			if(gSoundsCvar.BoolValue) {
 				EmitSoundToAll("passtime/horn_air2.wav", display[DDDigits][2]);
@@ -710,7 +697,7 @@ public int HandleMilestone(MilestoneType milestone, DonationDisplay display[Dona
 			SpawnProp(display, PropSpawnType_Notes);
 		}
 
-		case MilestoneType_50:
+		case MilestoneType_50: //Play mvm upgrade sound and spawn notes
 		{
 			if(gSoundsCvar.BoolValue) {
 				EmitSoundToAll("mvm/mvm_bought_upgrade.wav", display[DDDigits][2], SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, 0.6);
@@ -720,7 +707,7 @@ public int HandleMilestone(MilestoneType milestone, DonationDisplay display[Dona
 			SpawnProp(display, PropSpawnType_Notes);
 		}
 
-		case MilestoneType_25:
+		case MilestoneType_25: //Play mvm money sound and spawn coins
 		{
 			if(gSoundsCvar.BoolValue) {
 				EmitSoundToAll("mvm/mvm_money_pickup.wav", display[DDDigits][2], SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, 0.4);
@@ -752,6 +739,7 @@ public int SpawnProp(DonationDisplay display[DonationDisplay], PropSpawnType typ
 		return;
 	}
 
+	//Add some randomness to positioning
 	position[2] += GetRandomFloat(-3.0, 3.0);
 	rotation[0] = GetRandomFloat(-90.0, 90.0);
 	rotation[1] = GetRandomFloat(-90.0, 90.0);
@@ -770,9 +758,10 @@ public int SpawnProp(DonationDisplay display[DonationDisplay], PropSpawnType typ
 	DispatchSpawn(entity);
 	TeleportEntity(entity, position, rotation, NULL_VECTOR);
 
-	RequestFrame(InitProp, EntIndexToEntRef(entity));
+	RequestFrame(InitProp, EntIndexToEntRef(entity)); //Wait a frame to create gibs
 }
 
+//Break prop into gibs
 public int InitProp(any entity) {
 	int index = EntRefToEntIndex(entity);
 
