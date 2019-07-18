@@ -80,6 +80,11 @@ stock void ParseEntityConfig(KeyValues kv, ConfigEntry configEntry[ConfigEntry])
 			continue;
 		}
 
+		if(StrEqual(keyName, "noprops", false)) {
+			configEntry[CENoProps] = !!kv.GetNum(NULL_STRING, 1);
+			continue;
+		}
+
 		if(StrEqual(keyName, "regex", false)) {
 			configEntry[CERegex] = !!kv.GetNum(NULL_STRING, 1);
 			continue;

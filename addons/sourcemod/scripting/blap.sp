@@ -10,7 +10,9 @@
 #pragma semicolon 1
 
 #define PLUGIN_VERSION "1.1"
-#define HOLOGRAM_MODEL "models/blap/cappoint_hologram.mdl"
+#define HOLOGRAM_MODEL "models/blap19/cappoint_hologram.mdl"
+#define COINS_MODEL "models/blap19/coins/coins.mdl"
+#define NOTES_MODEL "models/blap19/notes/notes.mdl"
 
 #define _DEBUG true
 #define NO_SOCKET true
@@ -29,6 +31,7 @@ public Plugin myinfo =
 enum DonationDisplay {
 	DDParent,
 	Float:DDScale,
+	bool:DDNoProps,
 	Float:DDPosition[3],
 	Float:DDRotation[3],
 	EntityType:DDType,
@@ -40,7 +43,8 @@ enum DonationDisplay {
 enum ConfigEntry {
 	String:CETargetname[64], //Entity targetname
 	bool:CERegex, //Whether the targetname is a regex
-	bool:CEHide,
+	bool:CEHide, 
+	bool:CENoProps,
 	Float:CEScale, //Digit sprite scale
 	Float:CEPosition[3], //Position relative to entity center
 	Float:CERotation[3], //Rotation relative to entity angles
@@ -60,6 +64,20 @@ enum EntityType {
 	EntityType_Custom = 5,
 };
 
+enum MilestoneType {
+	MilestoneType_None = 0,
+	MilestoneType_1k = 1,
+	MilestoneType_25 = 2,
+	MilestoneType_50 = 3,
+	MilestoneType_100 = 4,
+}
+
+enum PropSpawnType {
+	PropSpawnType_None = 0,
+	PropSpawnType_Coins = 1,
+	PropSpawnType_Notes = 2,
+}
+
 enum Socket {
 	Handle:SSocket,
 	Handle:SHeartbeatTimer,
@@ -68,6 +86,7 @@ enum Socket {
 }
 
 int gDonationTotal;
+int gPreviousDonationTotal;
 int gDigitsRequired = 6;
 int gLastMilestone;
 
@@ -81,31 +100,38 @@ ConVar gTFDucksCvar;
 ConVar gDucksCvar;
 ConVar gCPsCvar;
 ConVar gDonationsCvar;
+ConVar gSoundsCvar;
+ConVar gPropsCvar;
 
 Handle gFallbackTimer = INVALID_HANDLE;
 Socket gSocket[Socket];
 
+#include <blap/precache>
 #include <blap/config>
 #include <blap/socket>
+#include <blap/http>
 
 public void OnPluginStart() {
 	gTFDucksCvar = FindConVar("tf_player_drop_bonus_ducks");
 	gDucksCvar = CreateConVar("blap_ducks_enabled", "1", "Whether blap reskinned ducks are enabled", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	gCPsCvar = CreateConVar("blap_cps_enabled", "1", "Whether blap reskinned control points are enabled", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	gSoundsCvar = CreateConVar("blap_sounds_enabled", "1", "Whether donation displays can make sounds", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	gPropsCvar = CreateConVar("blap_props_enabled", "1", "Whether donation displays can spawn props", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	gDonationsCvar = CreateConVar("blap_donations_enabled", "1", "Whether blap donation total displays are enabled", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 
 	RegAdminCmd("sm_reloadblap", Command_Reloadblap, ADMFLAG_GENERIC);
 	RegAdminCmd("sm_setdonationtotal", Command_SetDonationTotal, ADMFLAG_GENERIC);
+	RegAdminCmd("sm_testcoins", Command_TestCoins, ADMFLAG_GENERIC);
 
 	gDuckModels = new ArrayList(ByteCountToCells(PLATFORM_MAX_PATH));
 	gDonationDisplays = new ArrayList(view_as<int>(DonationDisplay));
 	gConfigEntries = new StringMap();
 	gConfigRegexes = new ArrayList(view_as<int>(ConfigRegex));
 
-	gDuckModels.PushString("models/blap/bonus_blap.mdl");
-	gDuckModels.PushString("models/blap/bonus_blap_2.mdl");
-	gDuckModels.PushString("models/blap/bonus_blap_3.mdl");
-	gDuckModels.PushString("models/blap/bonus_blap_4.mdl");
+	gDuckModels.PushString("models/blap19/ducks/bonus_blap.mdl");
+	gDuckModels.PushString("models/blap19/ducks/bonus_blap_2.mdl");
+	gDuckModels.PushString("models/blap19/ducks/bonus_blap_3.mdl");
+	gDuckModels.PushString("models/blap19/ducks/bonus_blap_4.mdl");
 
 	gDonationsCvar.AddChangeHook(OnDonationsCvarChanged);
 
@@ -123,62 +149,7 @@ public void OnMapStart() {
 	gConfigEntries.Clear();
 	gConfigRegexes.Clear();
 
-	for(int i = 0; i < gDuckModels.Length; i++) {
-		char model[PLATFORM_MAX_PATH];
-
-		gDuckModels.GetString(i, model, sizeof(model));
-		PrecacheModel(model);
-		AddFileToDownloadsTable(model);
-	}
-
-	PrecacheModel("models/items/currencypack_large.mdl");
-	PrecacheModel(HOLOGRAM_MODEL);
-	AddFileToDownloadsTable(HOLOGRAM_MODEL);
-
-	PrecacheGeneric("materials/blap/numbers-2019.vmt");
-	PrecacheGeneric("materials/blap/numbers-2019.vtf");
-	PrecacheGeneric("materials/blap/numbers-2019-comma.vmt");
-	PrecacheGeneric("materials/blap/numbers-2019-comma.vtf");
-
-	AddFileToDownloadsTable("materials/blap/numbers-2019.vmt");
-	AddFileToDownloadsTable("materials/blap/numbers-2019.vtf");
-	AddFileToDownloadsTable("materials/blap/numbers-2019-comma.vmt");
-	AddFileToDownloadsTable("materials/blap/numbers-2019-comma.vtf");
-
-	AddFileToDownloadsTable("materials/models/blap/cappoint_logo_blue.vtf");
-	AddFileToDownloadsTable("materials/models/blap/cappoint_logo_red.vtf");
-	AddFileToDownloadsTable("materials/models/effects/blap_cappoint_logo_blue.vmt");
-	AddFileToDownloadsTable("materials/models/effects/blap_cappoint_logo_blue_dark.vmt");
-	AddFileToDownloadsTable("materials/models/effects/blap_cappoint_logo_red.vmt");
-	AddFileToDownloadsTable("materials/models/effects/blap_cappoint_logo_red_dark.vmt");
-	
-	AddFileToDownloadsTable("models/blap/bonus_blap.dx80.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap.dx90.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap.sw.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap.vvd");
-	AddFileToDownloadsTable("models/blap/bonus_blap_2.dx80.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap_2.dx90.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap_2.sw.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap_2.vvd");
-	AddFileToDownloadsTable("models/blap/bonus_blap_3.dx80.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap_3.dx90.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap_3.sw.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap_3.vvd");
-	AddFileToDownloadsTable("models/blap/bonus_blap_4.dx80.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap_4.dx90.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap_4.sw.vtx");
-	AddFileToDownloadsTable("models/blap/bonus_blap_4.vvd");
-	AddFileToDownloadsTable("models/blap/cappoint_hologram.dx80.vtx");
-	AddFileToDownloadsTable("models/blap/cappoint_hologram.dx90.vtx");
-	AddFileToDownloadsTable("models/blap/cappoint_hologram.sw.vtx");
-	AddFileToDownloadsTable("models/blap/cappoint_hologram.vvd");
-
-	for(int i = 1; i <= 29; i++) {
-		char sound[PLATFORM_MAX_PATH];
-		Format(sound, sizeof(sound), "misc/happy_birthday_tf_%02i.wav", i);
-		PrecacheSound(sound);
-	}
-
+	PrecacheAssets();
 	LoadMapConfig();
 	RequestFrame(FindMapEntities);
 }
@@ -237,9 +208,25 @@ public Action Command_SetDonationTotal(int client, int args) {
 	GetCmdArg(1, totalArg, sizeof(totalArg));
 	total = StringToInt(totalArg);
 
+	gPreviousDonationTotal = gDonationTotal;
 	gDonationTotal = total;
 	UpdateDonationDisplays();
 	ReplyToCommand(client, "[SM] Total updated");
+
+	return Plugin_Handled;
+}
+
+public Action Command_TestCoins(int client, int args) {
+	ReplyToCommand(client, "[SM] Test coins created");
+	
+
+	for(int i = 0; i < gDonationDisplays.Length; i++) {
+		DonationDisplay entity[DonationDisplay];
+
+		gDonationDisplays.GetArray(i, entity[0], view_as<int>(DonationDisplay));
+
+		SpawnProp(entity, PropSpawnType_Coins);
+	}
 
 	return Plugin_Handled;
 }
@@ -326,6 +313,7 @@ void FindMapEntities(any unused) {
 			#endif
 
 			donationDisplay[DDScale] = configEntry[CEScale];
+			donationDisplay[DDNoProps] = !!configEntry[CENoProps];
 			
 			donationDisplay[DDPosition][0] = configEntry[CEPosition][0];
 			donationDisplay[DDPosition][1] = configEntry[CEPosition][1];
@@ -354,6 +342,7 @@ void FindMapEntities(any unused) {
 					gConfigEntries.GetArray(configRegex[CRConfigEntry], configEntry[0], view_as<int>(ConfigEntry));
 
 					donationDisplay[DDScale] = configEntry[CEScale];
+					donationDisplay[DDNoProps] = !!configEntry[CENoProps];
 					donationDisplay[DDType] = EntityType_Custom;
 					
 					donationDisplay[DDPosition][0] = configEntry[CEPosition][0];
@@ -580,26 +569,19 @@ int CreateDonationDigit(bool comma, bool startBlank = false) {
 	int entity = CreateEntityByName("env_sprite_oriented");
 
 	if(comma) {
-		DispatchKeyValue(entity, "model", "blap/numbers-2019-comma.vmt");
+		DispatchKeyValue(entity, "model", "blap19/numbers-comma.vmt");
 	} else {
-		DispatchKeyValue(entity, "model", "blap/numbers-2019.vmt");
+		DispatchKeyValue(entity, "model", "blap19/numbers.vmt");
 	}
 
 	DispatchKeyValue(entity, "framerate", "0");
 	DispatchKeyValue(entity, "spawnflags", "1");
 	DispatchKeyValue(entity, "scale", "0.25");
 	
-	// SetEntityRenderMode(entity, RENDER_NORMAL);
 	SetEntityRenderMode(entity, RENDER_TRANSALPHAADD);
 
 	DispatchSpawn(entity);
 	AcceptEntityInput(entity, "ShowSprite");
-	// SetVariantFloat(189.0);
-	// AcceptEntityInput(entity, "ColorRedValue");
-	// SetVariantFloat(217.0);
-	// AcceptEntityInput(entity, "ColorGreenValue");
-	// SetVariantFloat(55.0);
-	// AcceptEntityInput(entity, "ColorBlueValue");
 
 	if(startBlank) {
 		SetEntPropFloat(entity, Prop_Data, "m_flFrame", 110.0);
@@ -617,101 +599,12 @@ int CreateDonationDigit(bool comma, bool startBlank = false) {
 	return EntIndexToEntRef(entity);
 }
 
-void ScheduleDonationRequest(bool immediate = false) {
-	if(gFallbackTimer != INVALID_HANDLE) {
-		KillTimer(gFallbackTimer);
-		gFallbackTimer = INVALID_HANDLE;
-	}
-
-	if(!gDonationsCvar.BoolValue) {
-		return;
-	}
-
-	#if defined _DEBUG
-		LogMessage("HTTP: Scheduling donation request");
-	#endif
-
-	gFallbackTimer = CreateTimer(immediate ? 0.1 : 5.0, MakeDonationRequest);
-}
-
-public Action MakeDonationRequest(Handle timer, any data) {
-	#if defined _DEBUG
-		LogMessage("HTTP: Making donation request");
-	#endif
-
-	Handle request = SteamWorks_CreateHTTPRequest(k_EHTTPMethodGET, FALLBACK_URL);
-
-	SteamWorks_SetHTTPCallbacks(request, OnTotalRequestCompleted);
-
-	if(!SteamWorks_SendHTTPRequest(request)) {
-		LogError("HTTP: Donation total HTTP request failed");
-		ScheduleDonationRequest();
-	}
-
-	gFallbackTimer = INVALID_HANDLE;
-	return Plugin_Stop;
-}
-
-public int OnTotalRequestCompleted(Handle request, bool failure, bool successful, EHTTPStatusCode eStatusCode) {
-	ScheduleDonationRequest();
-
-	if(!successful || eStatusCode != k_EHTTPStatusCode200OK) {
-		LogError("Donation total HTTP request failed %d");
-
-	} else {
-		int size;
-
-		SteamWorks_GetHTTPResponseBodySize(request, size);
-
-		char[] sBody = new char[size];
-
-		SteamWorks_GetHTTPResponseBodyData(request, sBody, size);
-
-		int newTotal = ParseTotalJsonResponse(sBody);
-
-		if(newTotal > 0 && newTotal != gDonationTotal) {
-			#if defined _DEBUG
-			LogMessage("HTTP: New total received %d", newTotal);
-			#endif
-
-			gDonationTotal = newTotal;
-			UpdateDonationDisplays();
-		}
-	}
-
-	CloseHandle(request);
-}
-
-public int ParseTotalJsonResponse(const char[] json) {
-	Handle parsed = json_load(json);
-	char total[16];
-
-	if(parsed == INVALID_HANDLE) {
-		LogError("HTTP: Invalid json (failed to parse)");
-
-		return -1;
-	}
-
-
-	if(json_object_get_string(parsed, "grand_total", total, sizeof(total)) == -1) {
-		LogError("HTTP: Invalid json (invalid total)");
-
-		return -1;
-	}
-
-	ReplaceString(total, sizeof(total), "$", "");
-	ReplaceString(total, sizeof(total), ",", "");
-
-	CloseHandle(parsed);
-	return RoundToFloor(StringToFloat(total));
-}
-
 public int UpdateDonationDisplays() {
 	float digits[4] = { 110.0, 110.0, 110.0, 110.0 };
 	int divisor = 1;
 	int digitsRequired = 0;
 
-	bool milestone = false;
+	MilestoneType milestone = MilestoneType_None;
 	bool reposition = false;
 
 	if(gDonationTotal) {
@@ -741,9 +634,23 @@ public int UpdateDonationDisplays() {
 		digits[2] = 114.0;
 	}
 
+	int difference = gDonationTotal - gPreviousDonationTotal;
+
+	if(difference >= 25) {
+		milestone = MilestoneType_25;
+	}
+
+	if(difference >= 50) {
+		milestone = MilestoneType_50;
+	}
+
+	if(difference >= 100) {
+		milestone = MilestoneType_100;
+	}
+
 	if((gDonationTotal - (gDonationTotal % 1000)) > gLastMilestone) {
 		gLastMilestone = (gDonationTotal - (gDonationTotal % 1000));
-		milestone = true;
+		milestone = MilestoneType_1k;
 	}
 
 	//Number of required digits for display has changed
@@ -768,18 +675,114 @@ public int UpdateDonationDisplays() {
 			SetEntPropFloat(entity[DDDigits][j], Prop_Send, "m_flFrame", digits[j]);
 		}
 
-		if(milestone) {
-			char sound[PLATFORM_MAX_PATH];
-
-			Format(sound, sizeof(sound), "misc/happy_birthday_tf_%02i.wav", GetRandomInt(1, 29));
-
-			EmitSoundToAll(sound, entity[DDDigits][2]);
-			TE_Particle("bday_confetti", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, entity[DDDigits][1]);
+		if(milestone != MilestoneType_None) {
+			HandleMilestone(milestone, entity);
 		}
 		
 		TE_Particle("repair_claw_heal_blue", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, entity[DDDigits][2]);
 	}
 }
+
+public int HandleMilestone(MilestoneType milestone, DonationDisplay display[DonationDisplay]) {
+	switch(milestone) {
+		case MilestoneType_1k:
+		{
+			if(gSoundsCvar.BoolValue) {
+				char sound[PLATFORM_MAX_PATH];
+		
+				Format(sound, sizeof(sound), "misc/happy_birthday_tf_%02i.wav", GetRandomInt(1, 29));
+				EmitSoundToAll(sound, display[DDDigits][2]);
+			}
+
+			TE_Particle("bday_confetti", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display[DDDigits][1]);
+		}
+
+		case MilestoneType_100:
+		{
+			if(gSoundsCvar.BoolValue) {
+				EmitSoundToAll("passtime/horn_air2.wav", display[DDDigits][2]);
+				EmitSoundToAll("passtime/crowd_cheer.wav", display[DDDigits][2]);
+			}
+
+			TE_Particle("taunt_spy_cash", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display[DDDigits][1]);
+			TE_Particle("bday_balloon02", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display[DDDigits][1]);
+			SpawnProp(display, PropSpawnType_Coins);
+			SpawnProp(display, PropSpawnType_Notes);
+		}
+
+		case MilestoneType_50:
+		{
+			if(gSoundsCvar.BoolValue) {
+				EmitSoundToAll("mvm/mvm_bought_upgrade.wav", display[DDDigits][2], SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, 0.6);
+			}
+
+			TE_Particle("taunt_spy_cash", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display[DDDigits][1]);
+			SpawnProp(display, PropSpawnType_Notes);
+		}
+
+		case MilestoneType_25:
+		{
+			if(gSoundsCvar.BoolValue) {
+				EmitSoundToAll("mvm/mvm_money_pickup.wav", display[DDDigits][2], SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, 0.4);
+			}
+
+			TE_Particle("taunt_spy_cash", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display[DDDigits][1]);
+			SpawnProp(display, PropSpawnType_Coins);
+		}
+	}
+}
+
+public int SpawnProp(DonationDisplay display[DonationDisplay], PropSpawnType type) {
+	if(!gPropsCvar.BoolValue) {
+		return;
+	}
+
+	if(display[DDNoProps] != false) {
+		return;
+	}
+
+	float position[3];
+	float rotation[3];
+
+	GetEntPropVector(display[DDDigits][1], Prop_Data, "m_vecAbsOrigin", position);
+
+	int entity = CreateEntityByName("prop_physics_multiplayer");
+
+	if(entity < 0) {
+		return;
+	}
+
+	position[2] += GetRandomFloat(-3.0, 3.0);
+	rotation[0] = GetRandomFloat(-90.0, 90.0);
+	rotation[1] = GetRandomFloat(-90.0, 90.0);
+	rotation[2] = GetRandomFloat(-90.0, 90.0);
+
+	switch(type) {
+		case PropSpawnType_Coins:
+			SetEntityModel(entity, COINS_MODEL);
+		case PropSpawnType_Notes:
+			SetEntityModel(entity, NOTES_MODEL);
+		default:
+			return;
+	}
+
+
+	DispatchSpawn(entity);
+	TeleportEntity(entity, position, rotation, NULL_VECTOR);
+
+	RequestFrame(InitProp, EntIndexToEntRef(entity));
+}
+
+public int InitProp(any entity) {
+	int index = EntRefToEntIndex(entity);
+
+	if(index == INVALID_ENT_REFERENCE) {
+		return;
+	}
+
+	AcceptEntityInput(entity, "Break");
+}
+
 
 void TE_Particle(char[] Name, float origin[3]=NULL_VECTOR, float start[3]=NULL_VECTOR, float angles[3]=NULL_VECTOR, int entindex=-1, int attachtype=-1, int attachpoint=-1, bool resetParticles=true, float delay=0.0) {
     // find string table
