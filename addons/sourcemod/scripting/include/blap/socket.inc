@@ -2,8 +2,8 @@ void InitDonationSocket() {
 	#if defined NO_SOCKET
 	#if defined _DEBUG
 	LogMessage("Socket: Sockets disabled, using HTTP");
-	ScheduleDonationRequest(true);
 	#endif
+	ScheduleDonationRequest(true);
 	#else
 
 	if(gSocket[SSocket] != INVALID_HANDLE && SocketIsConnected(gSocket[SSocket])) {
