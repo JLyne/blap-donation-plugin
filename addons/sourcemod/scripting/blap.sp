@@ -1,10 +1,11 @@
 #include <sourcemod>
 #include <regex>
 #include <tf2_stocks>
-#include <halflife>
 #include <SteamWorks>
 #include <smjansson>
 #include <socket>
+#include <sdktools>
+#include <sdkhooks>
 
 #pragma newdecls required
 #pragma semicolon 1
@@ -13,6 +14,8 @@
 #define HOLOGRAM_MODEL "models/blap19/cappoint_hologram.mdl"
 #define COINS_MODEL "models/blap19/coins/coins.mdl"
 #define NOTES_MODEL "models/blap19/notes/notes.mdl"
+#define DUCK_PICKUP_SND "ui/itemcrate_smash_rare.wav"
+#define DUCK_PICKUP_PARTICLE "bday_confetti_colors"
 
 #define NO_SOCKET true
 #define FALLBACK_URL "https://blapbash.broadcast.tf/api/json_totals"
@@ -20,11 +23,20 @@
 public Plugin myinfo = 
 {
 	name = "Blap 19 stuff",
-	author = "Jim",
+	author = "Jim | 42 | Kenzzer",
 	description = "Ingame donation totals and reskinning for blap summer jam 2019",
 	version = PLUGIN_VERSION,
 	url = "http://steamcommunity.com/id/_NiGHTS/"
 };
+
+char g_sDucksModel[][] = {
+	"models/blap19/ducks/bonus_blap.mdl",
+	"models/blap19/ducks/bonus_blap_2.mdl",
+	"models/blap19/ducks/bonus_blap_3.mdl",
+	"models/blap19/ducks/bonus_blap_4.mdl"
+};
+
+int g_iDuckModelIndexes[sizeof(g_sDucksModel)];
 
 //Represents an active donation total linked to an entity on the map
 enum DonationDisplay {
@@ -61,6 +73,7 @@ enum EntityType {
 	EntityType_Intel = 3,
 	EntityType_Resupply = 4,
 	EntityType_Custom = 5,
+	EntityType_Tank = 7
 };
 
 enum MilestoneType {
@@ -89,14 +102,14 @@ int gPreviousDonationTotal;
 int gDigitsRequired = 6;
 int gLastMilestone;
 
-ArrayList gDuckModels;
+bool g_bPlayingMvM;
+
 ArrayList gDonationDisplays;
 
 StringMap gConfigEntries;
 ArrayList gConfigRegexes;
 
 //Cvars
-ConVar gTFDucksCvar;
 ConVar gDucksCvar;
 ConVar gCPsCvar;
 ConVar gDonationsCvar;
@@ -112,7 +125,7 @@ Socket gSocket[Socket];
 #include <blap/http>
 
 public void OnPluginStart() {
-	gTFDucksCvar = FindConVar("tf_player_drop_bonus_ducks");
+
 	gDucksCvar = CreateConVar("blap_ducks_enabled", "1", "Whether blap reskinned ducks are enabled", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	gCPsCvar = CreateConVar("blap_cps_enabled", "1", "Whether blap reskinned control points are enabled", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	gSoundsCvar = CreateConVar("blap_sounds_enabled", "1", "Whether donation displays can make sounds", FCVAR_NOTIFY, true, 0.0, true, 1.0);
@@ -122,20 +135,17 @@ public void OnPluginStart() {
 	RegAdminCmd("sm_reloadblap", Command_Reloadblap, ADMFLAG_GENERIC);
 	RegAdminCmd("sm_setdonationtotal", Command_SetDonationTotal, ADMFLAG_GENERIC);
 
-	gDuckModels = new ArrayList(ByteCountToCells(PLATFORM_MAX_PATH));
 	gDonationDisplays = new ArrayList(view_as<int>(DonationDisplay));
 	gConfigEntries = new StringMap();
 	gConfigRegexes = new ArrayList(view_as<int>(ConfigRegex));
 
-	//Possible duck models
-	gDuckModels.PushString("models/blap19/ducks/bonus_blap.mdl");
-	gDuckModels.PushString("models/blap19/ducks/bonus_blap_2.mdl");
-	gDuckModels.PushString("models/blap19/ducks/bonus_blap_3.mdl");
-	gDuckModels.PushString("models/blap19/ducks/bonus_blap_4.mdl");
-
 	gDonationsCvar.AddChangeHook(OnDonationsCvarChanged);
 
 	HookEvent("teamplay_round_start", OnRoundStart);
+	HookEvent("player_death", OnPlayerDeath);
+	
+	HookEvent("mvm_wave_complete", OnWaveUpdate);
+	HookEvent("mvm_begin_wave", OnWaveUpdate);
 }
 
 public void OnPluginEnd() {
@@ -152,16 +162,48 @@ public void OnMapStart() {
 	PrecacheAssets();
 	LoadMapConfig();
 	RequestFrame(FindMapEntities);
+	
+	g_bPlayingMvM = view_as<bool>(GameRules_GetProp("m_bPlayingMannVsMachine"));
 }
 
 public void OnConfigsExecuted() {
-	if(gTFDucksCvar != null && gDucksCvar.BoolValue) {
-		gTFDucksCvar.SetFloat(1.0);
-	}
-
+	
 	if(gDonationsCvar.BoolValue) {
 		InitDonationSocket();
 	} 
+}
+
+public void OnEntityCreated(int iEntity, const char[] sClassName)
+{
+	if (g_bPlayingMvM)
+	{
+		if (gDucksCvar.BoolValue && strncmp(sClassName, "item_currencypack", 17) == 0)
+			RequestFrame(Frame_UpdateMoney, EntIndexToEntRef(iEntity));
+		else if (strcmp(sClassName, "tank_boss", false) == 0)
+			RequestFrame(Frame_TankSpawn, EntIndexToEntRef(iEntity));
+	}
+}
+
+public void OnEntityDestroyed(int iEntity)
+{
+	if (!g_bPlayingMvM) return; // Since this only concerns the tank entity atm. We can save some performance for PvP
+	
+	for(int i = gDonationDisplays.Length-1; i >= 0; i--)
+	{
+		DonationDisplay entity[DonationDisplay];
+		gDonationDisplays.GetArray(i, entity[0], view_as<int>(DonationDisplay));
+		
+		if (entity[DDParent] != iEntity) continue;
+
+		for(int j = 0; j < 4; j++) {
+			if(IsValidEntity(entity[DDDigits][j])) {
+				AcceptEntityInput(entity[DDDigits][j], "Kill");
+			}
+		}
+		
+		gDonationDisplays.Erase(i);
+		break;
+	}
 }
 
 public Action OnRoundStart(Event event, const char[] name, bool dontBroadcast) {
@@ -171,10 +213,99 @@ public Action OnRoundStart(Event event, const char[] name, bool dontBroadcast) {
 		OnMapStart();
 	}
 }
+
+public Action OnWaveUpdate(Event event, const char[] name, bool dontBroadcast)
+{
+	UpdateDonationDisplays();
+}
+
+public Action OnPlayerDeath(Event event, const char[] name, bool dontBroadcast)
+{
+	int iClient = GetClientOfUserId(event.GetInt("userid"));
+	if (!iClient || g_bPlayingMvM || !gDucksCvar.BoolValue) return Plugin_Continue;
 	
-public void OnEntityCreated(int entity, const char[] classname) {
-	if(!strcmp(classname, "tf_bonus_duck_pickup", false) && gDucksCvar.BoolValue) {
-		RequestFrame(SetDuckModel, EntIndexToEntRef(entity));
+	if (GetEntityCount() > 1900) return Plugin_Continue;
+	
+	float vecPos[3], vecVel[3];
+	GetEntPropVector(iClient, Prop_Send, "m_vecOrigin", vecPos);
+	vecPos[2] += 20.0;
+	
+	for (int i = GetRandomInt(6,3); i > 0; i--)
+	{
+		int iKey = CreateEntityByName("tf_halloween_pickup");
+		
+		int iModelIndex = GetRandomInt(0, sizeof(g_sDucksModel)-1);
+		DispatchKeyValue(iKey, "powerup_model", g_sDucksModel[iModelIndex]);
+		DispatchKeyValue(iKey, "modelscale", "1.0");
+		DispatchKeyValue(iKey, "pickup_sound", "vo/null.mp3");
+		DispatchKeyValue(iKey, "pickup_particle", DUCK_PICKUP_PARTICLE);
+		
+		TeleportEntity(iKey, vecPos, NULL_VECTOR, NULL_VECTOR);
+		DispatchSpawn(iKey);
+		ActivateEntity(iKey);
+		
+		SetEntityMoveType(iKey, MOVETYPE_FLYGRAVITY);
+		SetEntProp(iKey, Prop_Data, "m_iEFlags", (1<<23)|(1<<22)|(2<<18));
+		for (int j = 0; j < 4; j++) SetEntProp(iKey, Prop_Send, "m_nModelIndexOverrides", g_iDuckModelIndexes[iModelIndex], _, j);
+		
+		vecVel[0] = GetRandomFloat(-100.0, 100.0);
+		vecVel[1] = GetRandomFloat(-100.0, 100.0);
+		vecVel[2] = GetRandomFloat(300.0, 400.0);
+		TeleportEntity(iKey, NULL_VECTOR, NULL_VECTOR, vecVel);
+		SetEntProp(iKey, Prop_Data, "m_MoveCollide", 1);
+		
+		SDKHook(iKey, SDKHook_Touch, Duck_OnTouch);
+		
+		HookSingleEntityOutput(iKey, "OnRedPickup", Duck_OnPickup, true);
+		HookSingleEntityOutput(iKey, "OnBluePickup", Duck_OnPickup, true);
+		SetVariantString("OnRedPickup !self:Kill::0.0:1");
+		AcceptEntityInput(iKey, "AddOutput");
+		
+		SetVariantString("OnBluePickup !self:Kill::0.0:1");
+		AcceptEntityInput(iKey, "AddOutput");
+		
+		SetVariantString("OnUser1 !self:Kill::30.0:1");
+		AcceptEntityInput(iKey, "AddOutput");
+		AcceptEntityInput(iKey, "FireUser1");
+	}
+	return Plugin_Continue;
+}
+
+public Action Duck_OnTouch(int iEntity, int iPlayer)
+{
+	if (0 < iPlayer <= MaxClients && IsClientInGame(iPlayer) && TF2_IsInvisible(iPlayer)) return Plugin_Handled;
+	return Plugin_Continue;
+}
+
+public Action Duck_OnPickup(const char[] output, int caller, int activator, float delay)
+{
+	EmitSoundToAll(DUCK_PICKUP_SND, caller, _, SNDLEVEL_DRYER);
+}
+
+void Frame_UpdateMoney(int iRef)
+{
+	int iMoney = EntRefToEntIndex(iRef);
+	if (iMoney > MaxClients)
+	{
+		int iModelIndex = GetRandomInt(0, sizeof(g_sDucksModel)-1);
+		for (int j = 0; j < 4; j++) SetEntProp(iMoney, Prop_Send, "m_nModelIndexOverrides", g_iDuckModelIndexes[iModelIndex], _, j);
+	}
+}
+
+void Frame_TankSpawn(int iRef)
+{
+	int iTank = EntRefToEntIndex(iRef);
+	if (iTank > MaxClients)
+	{
+		DonationDisplay donationDisplay[DonationDisplay];
+		
+		donationDisplay[DDParent] = iTank;
+		donationDisplay[DDScale] = 1.0;
+		donationDisplay[DDNoProps] = true;
+		donationDisplay[DDType] = EntityType_Tank;
+		
+		SetupDonationDisplay(iTank, donationDisplay);
+		UpdateDonationDisplays();
 	}
 }
 
@@ -214,20 +345,6 @@ public Action Command_SetDonationTotal(int client, int args) {
 	ReplyToCommand(client, "[SM] Total updated");
 
 	return Plugin_Handled;
-}
-
-public void SetDuckModel(any entity) {
-	entity = EntRefToEntIndex(entity);
-
-	if(entity != INVALID_ENT_REFERENCE) {
-		int index = GetRandomInt(0, gDuckModels.Length -1);
-		char model[PLATFORM_MAX_PATH];
-
-		gDuckModels.GetString(index, model, sizeof(model));
-
-		SetEntityModel(entity, model);
-		SetEntPropFloat(entity, Prop_Data, "m_flModelScale", 1.0);
-	}
 }
 
 //Loops over map entities and creates donation displays on appropriate ones
@@ -421,6 +538,14 @@ void PositionDonationDisplay(DonationDisplay donationDisplay[DonationDisplay]) {
 			rotationOffset[1] += 90.0;
 			offset[2] += 50.0;
 			offset[0] += 10.0;
+		}
+		
+		// Position in front of the tank
+		case EntityType_Tank :
+		{
+			rotationOffset[1] += 180.0;
+			offset[2] += 128.0;
+			offset[0] += 120.0;
 		}
 		
 		//Position above control point hologram
@@ -770,6 +895,15 @@ public int InitProp(any entity) {
 	}
 
 	AcceptEntityInput(entity, "Break");
+}
+
+bool TF2_IsInvisible(int client)
+{
+	return ((TF2_IsPlayerInCondition(client, TFCond_Cloaked) ||
+		TF2_IsPlayerInCondition(client, TFCond_DeadRingered) ||
+		TF2_IsPlayerInCondition(client, TFCond_Stealthed))
+		&& !TF2_IsPlayerInCondition(client, TFCond_StealthedUserBuffFade)
+		&& !TF2_IsPlayerInCondition(client, TFCond_CloakFlicker));
 }
 
 
