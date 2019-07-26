@@ -6,11 +6,10 @@ Sourcemod plugin for Blap Summer Jam 2019. Displays donation total ingame among 
 * Ingame donation total displays. Shown above objectives and next to resupplies by default, but can be added to any entity with custom positioning, rotation and size
 * Supports amounts from $1 to $9999999
 * Donations above $25, $50, $100 and which cross $x000, have their own effects and spawned props
-* Blap medals replacing EOTL ducks
+* Blap medals drop on player kills
 * Blap reskinned control points
 
 ## Requirements
-* `tf_player_drop_bonus_ducks 1` - For ducks to work, the plugin sets this on load
 * SteamWorks extension - For HTTP requests
 * Socket extension - For socket connections (not currently used)
 * Smjansson extension - For json parsing
@@ -21,7 +20,7 @@ Donation displays can be added to arbitrary entities on a per map basis, in the 
 
 ## Cvars
 
-* `blap_ducks_enabled` - Whether blap reskinned ducks are enabled.
+* `blap_ducks_enabled` - Whether blap medal drops are enabled.
 * `blap_cps_enabled`- Whether blap reskinned control points are enabled. Will take effect on map changes.
 * `blap_sounds_enabled` - Whether donation displays can make sounds.
 * `blap_props_enabled` - Whether donation displays can spawn props.
