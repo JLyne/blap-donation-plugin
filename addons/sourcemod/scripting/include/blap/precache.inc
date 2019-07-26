@@ -1,11 +1,12 @@
 public void PrecacheAssets() {
-	for(int i = 0; i < gDuckModels.Length; i++) {
-		char model[PLATFORM_MAX_PATH];
 
-		gDuckModels.GetString(i, model, sizeof(model));
-		PrecacheModel(model);
-		AddFileToDownloadsTable(model);
+	for (int i = 0; i < sizeof(g_sDucksModel); i++)
+	{
+		g_iDuckModelIndexes[i] = PrecacheModel(g_sDucksModel[i]);
+		AddFileToDownloadsTable(g_sDucksModel[i]);
 	}
+	
+	PrecacheSound(DUCK_PICKUP_SND);
 
 	PrecacheModel("models/items/currencypack_large.mdl");
 	PrecacheModel("models/blap19/coins/coin_gravel.mdl");
