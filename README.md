@@ -31,3 +31,7 @@ Donation displays can be added to arbitrary entities on a per map basis, in the 
 * Displays created at certain rotations can look incorrect
 * If a display is recreated while an entity is rotated (i.e a payload on a hill, rotating control point), the rotation will be incorrect.
 * Multiple prop spawning milestones in a row may stop spawning props, due to hitting the `cl_phys_props_max` limit. You'll need to increase it.
+
+## License
+
+This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License. To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/4.0/ or send a letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.
