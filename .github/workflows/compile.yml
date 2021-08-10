@@ -1,0 +1,63 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the master branch
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Download & Extract Sourcemod
+        run: |
+          wget 'https://sourcemod.net/latest.php?version=1.10&os=linux' -O sourcemod.tar.gz
+          mkdir build
+          tar -xzf sourcemod.tar.gz -C build
+        
+      - name: Prepare
+        run: |
+          mkdir addons/sourcemod/plugins
+          rsync -av addons/sourcemod/scripting/ build/addons/sourcemod/scripting
+          cd build/addons/sourcemod/scripting/include
+          wget https://raw.githubusercontent.com/KyleSanderson/SteamWorks/master/Pawn/includes/SteamWorks.inc
+          wget https://raw.githubusercontent.com/JoinedSenses/sm-ext-socket/master/scripting/include/socket.inc
+          wget https://raw.githubusercontent.com/thraaawn/SMJansson/master/pawn/scripting/include/smjansson.inc
+        
+      - name: Compile
+        run: |
+          cd build/addons/sourcemod/scripting
+          chmod +x compile.sh
+          ./compile.sh blap.sp
+          
+      
+      - name: Cleanup
+        run: |
+          mv build/addons/sourcemod/scripting/compiled/blap.smx addons/sourcemod/plugins/
+          rm -rf build
+          rm sourcemod.tar.gz
+          
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v2.2.4
+        with:
+          name: 'blap-donation-total'
+          path: |
+            .
+            !.git
+            !.github
+          if-no-files-found: error
