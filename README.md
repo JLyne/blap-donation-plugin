@@ -1,5 +1,5 @@
-# blap-2019-plugin
-Sourcemod plugin for Blap Summer Jam 2019. Displays donation total ingame among other things.
+# blap-donation-plugin
+Sourcemod plugin for Blap Summer Jam. Displays donation total ingame among other things.
 
 ## Features
 
