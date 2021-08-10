@@ -1,9 +1,7 @@
 public void PrecacheAssets() {
-
-	for (int i = 0; i < sizeof(g_sDucksModel); i++)
-	{
-		g_iDuckModelIndexes[i] = PrecacheModel(g_sDucksModel[i]);
-		AddFileToDownloadsTable(g_sDucksModel[i]);
+	for(int i = 0; i < sizeof(gDuckModels); i++) {
+		gDuckModelIndexes[i] = PrecacheModel(gDuckModels[i]);
+		AddFileToDownloadsTable(gDuckModels[i]);
 	}
 	
 	PrecacheSound(DUCK_PICKUP_SND);

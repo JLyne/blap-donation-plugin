@@ -29,41 +29,41 @@ public Plugin myinfo =
 	url = "http://steamcommunity.com/id/_NiGHTS/"
 };
 
-char g_sDucksModel[][] = {
+char gDuckModels[][] = {
 	"models/blap19/ducks/bonus_blap.mdl",
 	"models/blap19/ducks/bonus_blap_2.mdl",
 	"models/blap19/ducks/bonus_blap_3.mdl",
 	"models/blap19/ducks/bonus_blap_4.mdl"
 };
 
-int g_iDuckModelIndexes[sizeof(g_sDucksModel)];
+int gDuckModelIndexes[sizeof(gDuckModels)];
 
 //Represents an active donation total linked to an entity on the map
-enum DonationDisplay {
-	DDParent,
-	Float:DDScale,
-	bool:DDNoProps,
-	Float:DDPosition[3],
-	Float:DDRotation[3],
-	EntityType:DDType,
+enum struct DonationDisplay {
+	int parent;
+	float scale;
+	bool noProps;
+	float position[3];
+	float rotation[3];
+	EntityType type;
 
 	//Ent references for 4 sets of digits
-	DDDigits[4],
+	int digits[4];
 }
 
-enum ConfigEntry {
-	String:CETargetname[64], //Entity targetname
-	bool:CERegex, //Whether the targetname is a regex
-	bool:CEHide, //Whether to prevent creation of default donation displays
-	bool:CENoProps,//Whether to suppress prop spawns
-	Float:CEScale, //Digit sprite scale
-	Float:CEPosition[3], //Position relative to entity center
-	Float:CERotation[3], //Rotation relative to entity angles
+enum struct ConfigEntry {
+	char targetname[64]; //Entity targetname
+	bool regex; //Whether the targetname is a regex
+	bool hide; //Whether to prevent creation of default donation displays
+	bool noProps;//Whether to suppress prop spawns
+	float scale; //Digit sprite scale
+	float position[3]; //Position relative to entity center
+	float rotation[3]; //Rotation relative to entity angles
 }
 
-enum ConfigRegex {
-	Regex:CRRegex,
-	String:CRConfigEntry[64],
+enum struct ConfigRegex {
+	Regex regex;
+	char configEntry[64];
 }
 
 enum EntityType {
@@ -90,11 +90,11 @@ enum PropSpawnType {
 	PropSpawnType_Notes = 2,
 }
 
-enum Socket {
-	Handle:SSocket,
-	Handle:SHeartbeatTimer,
-	Handle:STimeoutTimer,
-	SAttempts,
+enum struct TrackerSocket {
+	Handle socket;
+	Handle heartbeatTimer;
+	Handle timeoutTimer;
+	int attempts;
 }
 
 int gDonationTotal;
@@ -102,7 +102,7 @@ int gPreviousDonationTotal;
 int gDigitsRequired = 6;
 int gLastMilestone;
 
-bool g_bPlayingMvM;
+bool gbPlayingMvM;
 
 ArrayList gDonationDisplays;
 
@@ -117,7 +117,7 @@ ConVar gSoundsCvar;
 ConVar gPropsCvar;
 
 Handle gFallbackTimer = INVALID_HANDLE;
-Socket gSocket[Socket];
+TrackerSocket gSocket;
 
 #include <blap/precache>
 #include <blap/config>
@@ -125,7 +125,6 @@ Socket gSocket[Socket];
 #include <blap/http>
 
 public void OnPluginStart() {
-
 	gDucksCvar = CreateConVar("blap_ducks_enabled", "1", "Whether blap reskinned ducks are enabled", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	gCPsCvar = CreateConVar("blap_cps_enabled", "1", "Whether blap reskinned control points are enabled", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	gSoundsCvar = CreateConVar("blap_sounds_enabled", "1", "Whether donation displays can make sounds", FCVAR_NOTIFY, true, 0.0, true, 1.0);
@@ -135,9 +134,9 @@ public void OnPluginStart() {
 	RegAdminCmd("sm_reloadblap", Command_Reloadblap, ADMFLAG_GENERIC);
 	RegAdminCmd("sm_setdonationtotal", Command_SetDonationTotal, ADMFLAG_GENERIC);
 
-	gDonationDisplays = new ArrayList(view_as<int>(DonationDisplay));
+	gDonationDisplays = new ArrayList(sizeof(DonationDisplay));
 	gConfigEntries = new StringMap();
-	gConfigRegexes = new ArrayList(view_as<int>(ConfigRegex));
+	gConfigRegexes = new ArrayList(sizeof(ConfigRegex));
 
 	gDonationsCvar.AddChangeHook(OnDonationsCvarChanged);
 
@@ -163,45 +162,46 @@ public void OnMapStart() {
 	LoadMapConfig();
 	RequestFrame(FindMapEntities);
 	
-	g_bPlayingMvM = view_as<bool>(GameRules_GetProp("m_bPlayingMannVsMachine"));
+	gbPlayingMvM = view_as<bool>(GameRules_GetProp("m_bPlayingMannVsMachine"));
 }
 
 public void OnConfigsExecuted() {
-	
 	if(gDonationsCvar.BoolValue) {
 		InitDonationSocket();
 	} 
 }
 
-public void OnEntityCreated(int iEntity, const char[] sClassName)
-{
-	if (g_bPlayingMvM)
-	{
-		if (gDucksCvar.BoolValue && strncmp(sClassName, "item_currencypack", 17) == 0)
+public void OnEntityCreated(int iEntity, const char[] sClassName) {
+	if(gbPlayingMvM) {
+		if(gDucksCvar.BoolValue && strncmp(sClassName, "item_currencypack", 17) == 0) {
 			RequestFrame(Frame_UpdateMoney, EntIndexToEntRef(iEntity));
-		else if (strcmp(sClassName, "tank_boss", false) == 0)
+		} else if(strcmp(sClassName, "tank_boss", false) == 0) {
 			RequestFrame(Frame_TankSpawn, EntIndexToEntRef(iEntity));
+		}
 	}
 }
 
-public void OnEntityDestroyed(int iEntity)
-{
-	if (!g_bPlayingMvM) return; // Since this only concerns the tank entity atm. We can save some performance for PvP
+public void OnEntityDestroyed(int iEntity) {
+	if(!gbPlayingMvM) {
+		return; // Since this only concerns the tank entity atm. We can save some performance for PvP
+	}
 	
-	for(int i = gDonationDisplays.Length-1; i >= 0; i--)
-	{
-		DonationDisplay entity[DonationDisplay];
-		gDonationDisplays.GetArray(i, entity[0], view_as<int>(DonationDisplay));
+	for(int i = gDonationDisplays.Length-1; i >= 0; i--) {
+		DonationDisplay entity;
+		gDonationDisplays.GetArray(i, entity, sizeof(DonationDisplay));
 		
-		if (entity[DDParent] != iEntity) continue;
+		if(entity.parent != iEntity) {
+			continue;
+		}
 
 		for(int j = 0; j < 4; j++) {
-			if(IsValidEntity(entity[DDDigits][j])) {
-				AcceptEntityInput(entity[DDDigits][j], "Kill");
+			if(IsValidEntity(entity.digits[j])) {
+				AcceptEntityInput(entity.digits[j], "Kill");
 			}
 		}
 		
 		gDonationDisplays.Erase(i);
+
 		break;
 	}
 }
@@ -214,28 +214,29 @@ public Action OnRoundStart(Event event, const char[] name, bool dontBroadcast) {
 	}
 }
 
-public Action OnWaveUpdate(Event event, const char[] name, bool dontBroadcast)
-{
+public Action OnWaveUpdate(Event event, const char[] name, bool dontBroadcast) {
 	UpdateDonationDisplays();
 }
 
-public Action OnPlayerDeath(Event event, const char[] name, bool dontBroadcast)
-{
+public Action OnPlayerDeath(Event event, const char[] name, bool dontBroadcast) {
 	int iClient = GetClientOfUserId(event.GetInt("userid"));
-	if (!iClient || g_bPlayingMvM || !gDucksCvar.BoolValue) return Plugin_Continue;
+	if(!iClient || gbPlayingMvM || !gDucksCvar.BoolValue) {
+		return Plugin_Continue;
+	}
 	
-	if (GetEntityCount() > 1900) return Plugin_Continue;
-	
+	if(GetEntityCount() > 1900) {
+		return Plugin_Continue;
+	} 
+
 	float vecPos[3], vecVel[3];
 	GetEntPropVector(iClient, Prop_Send, "m_vecOrigin", vecPos);
 	vecPos[2] += 20.0;
 	
-	for (int i = GetRandomInt(6,3); i > 0; i--)
-	{
+	for(int i = GetRandomInt(6,3); i > 0; i--) {
 		int iKey = CreateEntityByName("tf_halloween_pickup");
 		
-		int iModelIndex = GetRandomInt(0, sizeof(g_sDucksModel)-1);
-		DispatchKeyValue(iKey, "powerup_model", g_sDucksModel[iModelIndex]);
+		int iModelIndex = GetRandomInt(0, sizeof(gDuckModels)-1);
+		DispatchKeyValue(iKey, "powerup_model", gDuckModels[iModelIndex]);
 		DispatchKeyValue(iKey, "modelscale", "1.0");
 		DispatchKeyValue(iKey, "pickup_sound", "vo/null.mp3");
 		DispatchKeyValue(iKey, "pickup_particle", DUCK_PICKUP_PARTICLE);
@@ -246,7 +247,7 @@ public Action OnPlayerDeath(Event event, const char[] name, bool dontBroadcast)
 		
 		SetEntityMoveType(iKey, MOVETYPE_FLYGRAVITY);
 		SetEntProp(iKey, Prop_Data, "m_iEFlags", (1<<23)|(1<<22)|(2<<18));
-		for (int j = 0; j < 4; j++) SetEntProp(iKey, Prop_Send, "m_nModelIndexOverrides", g_iDuckModelIndexes[iModelIndex], _, j);
+		for (int j = 0; j < 4; j++) SetEntProp(iKey, Prop_Send, "m_nModelIndexOverrides", gDuckModelIndexes[iModelIndex], _, j);
 		
 		vecVel[0] = GetRandomFloat(-100.0, 100.0);
 		vecVel[1] = GetRandomFloat(-100.0, 100.0);
@@ -268,41 +269,41 @@ public Action OnPlayerDeath(Event event, const char[] name, bool dontBroadcast)
 		AcceptEntityInput(iKey, "AddOutput");
 		AcceptEntityInput(iKey, "FireUser1");
 	}
+
 	return Plugin_Continue;
 }
 
-public Action Duck_OnTouch(int iEntity, int iPlayer)
-{
-	if (0 < iPlayer <= MaxClients && IsClientInGame(iPlayer) && TF2_IsInvisible(iPlayer)) return Plugin_Handled;
+public Action Duck_OnTouch(int iEntity, int iPlayer) {
+	if(0 < iPlayer <= MaxClients && IsClientInGame(iPlayer) && TF2_IsInvisible(iPlayer)) {
+		return Plugin_Handled;
+	}
+
 	return Plugin_Continue;
 }
 
-public Action Duck_OnPickup(const char[] output, int caller, int activator, float delay)
-{
+public Action Duck_OnPickup(const char[] output, int caller, int activator, float delay) {
 	EmitSoundToAll(DUCK_PICKUP_SND, caller, _, SNDLEVEL_DRYER);
 }
 
-void Frame_UpdateMoney(int iRef)
-{
+void Frame_UpdateMoney(int iRef) {
 	int iMoney = EntRefToEntIndex(iRef);
-	if (iMoney > MaxClients)
-	{
-		int iModelIndex = GetRandomInt(0, sizeof(g_sDucksModel)-1);
-		for (int j = 0; j < 4; j++) SetEntProp(iMoney, Prop_Send, "m_nModelIndexOverrides", g_iDuckModelIndexes[iModelIndex], _, j);
+
+	if(iMoney > MaxClients) {
+		int iModelIndex = GetRandomInt(0, sizeof(gDuckModels)-1);
+		for (int j = 0; j < 4; j++) SetEntProp(iMoney, Prop_Send, "m_nModelIndexOverrides", gDuckModelIndexes[iModelIndex], _, j);
 	}
 }
 
-void Frame_TankSpawn(int iRef)
-{
+void Frame_TankSpawn(int iRef) {
 	int iTank = EntRefToEntIndex(iRef);
-	if (iTank > MaxClients)
-	{
-		DonationDisplay donationDisplay[DonationDisplay];
+
+	if(iTank > MaxClients) {
+		DonationDisplay donationDisplay;
 		
-		donationDisplay[DDParent] = iTank;
-		donationDisplay[DDScale] = 1.0;
-		donationDisplay[DDNoProps] = true;
-		donationDisplay[DDType] = EntityType_Tank;
+		donationDisplay.parent = iTank;
+		donationDisplay.scale = 1.0;
+		donationDisplay.noProps = true;
+		donationDisplay.type = EntityType_Tank;
 		
 		SetupDonationDisplay(iTank, donationDisplay);
 		UpdateDonationDisplays();
@@ -378,14 +379,14 @@ void FindMapEntities(any unused) {
 		GetEntPropString(i, Prop_Data, "m_iName", name, sizeof(name));
 		GetEntityClassname(i, class, 32);
 		
-		ConfigEntry configEntry[ConfigEntry];
-		DonationDisplay donationDisplay[DonationDisplay];
+		ConfigEntry configEntry;
+		DonationDisplay donationDisplay;
 
-		donationDisplay[DDParent] = i;
+		donationDisplay.parent = i;
 
 		//Reskin and setup display for control points
 		if(StrEqual(class, "team_control_point", false)) {
-			donationDisplay[DDType] = EntityType_ControlPoint;
+			donationDisplay.type = EntityType_ControlPoint;
 
 			if(gCPsCvar.BoolValue) {
 				PrepareControlPoint(i);
@@ -394,71 +395,71 @@ void FindMapEntities(any unused) {
 
 		//Reskin and setup display for intel
 		if(StrEqual(class, "item_teamflag", false)) {
-			donationDisplay[DDType] = EntityType_Intel;
+			donationDisplay.type = EntityType_Intel;
 			PrepareFlag(i);
 		}
 
 		//Payloads
 		if(payloads.FindString(name) > -1) {
-			donationDisplay[DDType] = EntityType_PayloadCart;
+			donationDisplay.type = EntityType_PayloadCart;
 		}
 
 		//Resupply cabinets
 		if(cabinets.FindValue(i) > -1) {
-			donationDisplay[DDType] = EntityType_Resupply;			
+			donationDisplay.type = EntityType_Resupply;			
 		}
 
 		//Check if entity has a config entry and use if so
-		if(gConfigEntries.GetArray(name, configEntry[0], view_as<int>(ConfigEntry))) {
+		if(gConfigEntries.GetArray(name, configEntry, sizeof(ConfigEntry))) {
 			#if defined _DEBUG
 				PrintToServer("Entity %s has config entry", name);
 			#endif
 
-			donationDisplay[DDScale] = configEntry[CEScale];
-			donationDisplay[DDNoProps] = !!configEntry[CENoProps];
+			donationDisplay.scale = configEntry.scale;
+			donationDisplay.noProps = !!configEntry.noProps;
 			
-			donationDisplay[DDPosition][0] = configEntry[CEPosition][0];
-			donationDisplay[DDPosition][1] = configEntry[CEPosition][1];
-			donationDisplay[DDPosition][2] = configEntry[CEPosition][2];
+			donationDisplay.position[0] = configEntry.position[0];
+			donationDisplay.position[1] = configEntry.position[1];
+			donationDisplay.position[2] = configEntry.position[2];
 
-			donationDisplay[DDRotation][0] = configEntry[CERotation][0];
-			donationDisplay[DDRotation][1] = configEntry[CERotation][1];
-			donationDisplay[DDRotation][2] = configEntry[CERotation][2];
+			donationDisplay.rotation[0] = configEntry.rotation[0];
+			donationDisplay.rotation[1] = configEntry.rotation[1];
+			donationDisplay.rotation[2] = configEntry.rotation[2];
 
-			if(donationDisplay[DDType] == EntityType_None) {
-				donationDisplay[DDType] = EntityType_Custom;
+			if(donationDisplay.type == EntityType_None) {
+				donationDisplay.type = EntityType_Custom;
 			}
 		}
 
 		//Check for regex matches and use it's config entry if matching
 		if(strlen(name)) {
 			for(int j = 0; j < gConfigRegexes.Length; j++) {
-				ConfigRegex configRegex[ConfigRegex];
-				gConfigRegexes.GetArray(j, configRegex[0], view_as<int>(ConfigRegex));
+				ConfigRegex configRegex;
+				gConfigRegexes.GetArray(j, configRegex, sizeof(ConfigRegex));
 
-				if(configRegex[CRRegex].Match(name) > 0) {
+				if(configRegex.regex.Match(name) > 0) {
 					#if defined _DEBUG
 						PrintToServer("Entity %s matched config regex", name);
 					#endif
 
-					gConfigEntries.GetArray(configRegex[CRConfigEntry], configEntry[0], view_as<int>(ConfigEntry));
+					gConfigEntries.GetArray(configRegex.configEntry, configEntry, sizeof(ConfigEntry));
 
-					donationDisplay[DDScale] = configEntry[CEScale];
-					donationDisplay[DDNoProps] = !!configEntry[CENoProps];
-					donationDisplay[DDType] = EntityType_Custom;
+					donationDisplay.scale = configEntry.scale;
+					donationDisplay.noProps = !!configEntry.noProps;
+					donationDisplay.type = EntityType_Custom;
 					
-					donationDisplay[DDPosition][0] = configEntry[CEPosition][0];
-					donationDisplay[DDPosition][1] = configEntry[CEPosition][1];
-					donationDisplay[DDPosition][2] = configEntry[CEPosition][2];
+					donationDisplay.position[0] = configEntry.position[0];
+					donationDisplay.position[1] = configEntry.position[1];
+					donationDisplay.position[2] = configEntry.position[2];
 
-					donationDisplay[DDRotation][0] = configEntry[CERotation][0];
-					donationDisplay[DDRotation][1] = configEntry[CERotation][1];
-					donationDisplay[DDRotation][2] = configEntry[CERotation][2];
+					donationDisplay.rotation[0] = configEntry.rotation[0];
+					donationDisplay.rotation[1] = configEntry.rotation[1];
+					donationDisplay.rotation[2] = configEntry.rotation[2];
 				}
 			}
 		}
 
-		if(configEntry[CEHide]) {
+		if(configEntry.hide) {
 			#if defined _DEBUG
 				PrintToServer("Donation display for %s hidden", name);
 			#endif
@@ -467,9 +468,9 @@ void FindMapEntities(any unused) {
 		}
 
 		//If entity should have a donation display create it
-		if(donationDisplay[DDType] != EntityType_None && gDonationsCvar.BoolValue) {
+		if(donationDisplay.type != EntityType_None && gDonationsCvar.BoolValue) {
 			#if defined _DEBUG
-				PrintToServer("Entity %s has donation display of type %d", name, donationDisplay[DDType]);
+				PrintToServer("Entity %s has donation display of type %d", name, donationDisplay.type);
 			#endif
 
 			SetupDonationDisplay(i, donationDisplay);
@@ -479,27 +480,27 @@ void FindMapEntities(any unused) {
 	UpdateDonationDisplays();
 }
 
-void SetupDonationDisplay(int entity, DonationDisplay donationDisplay[DonationDisplay]) {
-	if(!donationDisplay[DDParent]) {
-		donationDisplay[DDParent] = entity;
+void SetupDonationDisplay(int entity, DonationDisplay donationDisplay) {
+	if(!donationDisplay.parent) {
+		donationDisplay.parent = entity;
 	}
 
-	if(!donationDisplay[DDScale]) {
-		donationDisplay[DDScale] = 1.0;
+	if(!donationDisplay.scale) {
+		donationDisplay.scale = 1.0;
 	}
 
-	donationDisplay[DDDigits][0] = CreateDonationDigit(false);
-	donationDisplay[DDDigits][1] = CreateDonationDigit(true);
-	donationDisplay[DDDigits][2] = CreateDonationDigit(false);
-	donationDisplay[DDDigits][3] = CreateDonationDigit(false, true);
+	donationDisplay.digits[0] = CreateDonationDigit(false);
+	donationDisplay.digits[1] = CreateDonationDigit(true);
+	donationDisplay.digits[2] = CreateDonationDigit(false);
+	donationDisplay.digits[3] = CreateDonationDigit(false, true);
 
-	int index = gDonationDisplays.PushArray(donationDisplay[0]);
+	int index = gDonationDisplays.PushArray(donationDisplay);
 
 	PositionDonationDisplay(donationDisplay);
 	ParentDonationDisplay(donationDisplay, index);
 }
 
-void PositionDonationDisplay(DonationDisplay donationDisplay[DonationDisplay]) {
+void PositionDonationDisplay(DonationDisplay donationDisplay) {
 	float position[3]; //Entity origin
 	float angles[3]; //Entity rotation
 
@@ -507,15 +508,15 @@ void PositionDonationDisplay(DonationDisplay donationDisplay[DonationDisplay]) {
 	float rotationOffset[3]; 
 	float displayPosition[3]; //Final sprite position
 
-	float firstDigitOffset = GetFirstDigitOffset(donationDisplay[DDType] == EntityType_Resupply) * donationDisplay[DDScale]; //Initial offset before first digit to roughly "center" the display around the desired position
-	float digitSpacing = 32.0 * donationDisplay[DDScale]; //Spacing between digits
+	float firstDigitOffset = GetFirstDigitOffset(donationDisplay.type == EntityType_Resupply) * donationDisplay.scale; //Initial offset before first digit to roughly "center" the display around the desired position
+	float digitSpacing = 32.0 * donationDisplay.scale; //Spacing between digits
 
 	char scale[10];
 
-	GetEntPropVector(donationDisplay[DDParent], Prop_Data, "m_vecAbsOrigin", position);
-	GetEntPropVector(donationDisplay[DDParent], Prop_Send, "m_angRotation", angles);
+	GetEntPropVector(donationDisplay.parent, Prop_Data, "m_vecAbsOrigin", position);
+	GetEntPropVector(donationDisplay.parent, Prop_Send, "m_angRotation", angles);
 
-	switch(donationDisplay[DDType]) {
+	switch(donationDisplay.type) {
 		case EntityType_Resupply :
 		{
 			rotationOffset[1] += 180.0;
@@ -553,17 +554,17 @@ void PositionDonationDisplay(DonationDisplay donationDisplay[DonationDisplay]) {
 			offset[2] += 30.0;
 	}
 
-	Format(scale, sizeof(scale), "%00.2f", 0.25 * donationDisplay[DDScale]);
+	Format(scale, sizeof(scale), "%00.2f", 0.25 * donationDisplay.scale);
 
 	//Add position offset from config
-	offset[0] += donationDisplay[DDPosition][0];
-	offset[1] += donationDisplay[DDPosition][1];
-	offset[2] += donationDisplay[DDPosition][2];
+	offset[0] += donationDisplay.position[0];
+	offset[1] += donationDisplay.position[1];
+	offset[2] += donationDisplay.position[2];
 
 	//Add rotation offset from config
-	rotationOffset[0] += donationDisplay[DDRotation][0];
-	rotationOffset[1] += donationDisplay[DDRotation][1];
-	rotationOffset[2] += donationDisplay[DDRotation][2];
+	rotationOffset[0] += donationDisplay.rotation[0];
+	rotationOffset[1] += donationDisplay.rotation[1];
+	rotationOffset[2] += donationDisplay.rotation[2];
 
 	//Angle vectors
 	float fwd[3];
@@ -596,36 +597,36 @@ void PositionDonationDisplay(DonationDisplay donationDisplay[DonationDisplay]) {
 			SubtractVectors(displayPosition, right, displayPosition);
 		}
 
-		DispatchKeyValue(donationDisplay[DDDigits][i], "scale", scale);
-		TeleportEntity(donationDisplay[DDDigits][i], displayPosition, angles, NULL_VECTOR);
+		DispatchKeyValue(donationDisplay.digits[i], "scale", scale);
+		TeleportEntity(donationDisplay.digits[i], displayPosition, angles, NULL_VECTOR);
 	}
 }
 
-void ParentDonationDisplay(DonationDisplay donationDisplay[DonationDisplay], int index) {
+void ParentDonationDisplay(DonationDisplay donationDisplay, int index) {
 	for(int i = 0; i < 4; i++) {
 		SetVariantString("!activator");
-		AcceptEntityInput(donationDisplay[DDDigits][i], "SetParent", donationDisplay[DDParent], donationDisplay[DDParent]);
+		AcceptEntityInput(donationDisplay.digits[i], "SetParent", donationDisplay.parent, donationDisplay.parent);
 	}
 
-	if(donationDisplay[DDType] == EntityType_ControlPoint) {
+	if(donationDisplay.type == EntityType_ControlPoint) {
 		RequestFrame(ParentControlPointDonationDisplay, index);
 	}
 }
 
 void ParentControlPointDonationDisplay(any index) {
-	DonationDisplay donationDisplay[DonationDisplay];
+	DonationDisplay donationDisplay;
 
-	gDonationDisplays.GetArray(index, donationDisplay[0], view_as<int>(DonationDisplay));
+	gDonationDisplays.GetArray(index, donationDisplay, sizeof(DonationDisplay));
 
 	for(int i = 0; i < 4; i++) {
 		SetVariantString("donations");
-		AcceptEntityInput(donationDisplay[DDDigits][i], "SetParentAttachmentMaintainOffset");
+		AcceptEntityInput(donationDisplay.digits[i], "SetParentAttachmentMaintainOffset");
 	}
 }
 
-void UnparentDonationDisplay(DonationDisplay donationDisplay[DonationDisplay]) {
+void UnparentDonationDisplay(DonationDisplay donationDisplay) {
 	for(int i = 0; i < 4; i++) {
-		AcceptEntityInput(donationDisplay[DDDigits][i], "ClearParent", donationDisplay[DDParent], donationDisplay[DDParent]);
+		AcceptEntityInput(donationDisplay.digits[i], "ClearParent", donationDisplay.parent, donationDisplay.parent);
 	}
 }
 
@@ -640,13 +641,13 @@ float GetFirstDigitOffset(bool resupply = false) {
 
 void DestroyDonationDisplays() {
 	for(int i = 0; i < gDonationDisplays.Length; i++) {
-		DonationDisplay entity[DonationDisplay];
+		DonationDisplay entity;
 
-		gDonationDisplays.GetArray(i, entity[0], view_as<int>(DonationDisplay));
+		gDonationDisplays.GetArray(i, entity, sizeof(DonationDisplay));
 
 		for(int j = 0; j < 4; j++) {
-			if(IsValidEntity(entity[DDDigits][j])) {
-				AcceptEntityInput(entity[DDDigits][j], "Kill");
+			if(IsValidEntity(entity.digits[j])) {
+				AcceptEntityInput(entity.digits[j], "Kill");
 			}
 		}
 	}
@@ -772,30 +773,30 @@ public int UpdateDonationDisplays() {
 	}
 
 	for(int i = 0; i < gDonationDisplays.Length; i++) {
-		DonationDisplay entity[DonationDisplay];
+		DonationDisplay entity;
 
-		gDonationDisplays.GetArray(i, entity[0], view_as<int>(DonationDisplay));
+		gDonationDisplays.GetArray(i, entity, sizeof(DonationDisplay));
 
 		//If display needs repositioning, unparent then reparent to avoid weirdness
-		if(reposition && entity[DDType] != EntityType_Resupply) {
+		if(reposition && entity.type != EntityType_Resupply) {
 			UnparentDonationDisplay(entity);
 			PositionDonationDisplay(entity);
 			ParentDonationDisplay(entity, i);
 		}
 
 		for(int j = 0; j < 4; j++) {
-			SetEntPropFloat(entity[DDDigits][j], Prop_Send, "m_flFrame", digits[j]);
+			SetEntPropFloat(entity.digits[j], Prop_Send, "m_flFrame", digits[j]);
 		}
 
 		if(milestone != MilestoneType_None) {
 			HandleMilestone(milestone, entity);
 		}
 		
-		TE_Particle("repair_claw_heal_blue", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, entity[DDDigits][2]);
+		TE_Particle("repair_claw_heal_blue", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, entity.digits[2]);
 	}
 }
 
-public int HandleMilestone(MilestoneType milestone, DonationDisplay display[DonationDisplay]) {
+public int HandleMilestone(MilestoneType milestone, DonationDisplay display) {
 	switch(milestone) {
 		case MilestoneType_1k: //Play tf_birthday sound and spawn confetti
 		{
@@ -803,21 +804,21 @@ public int HandleMilestone(MilestoneType milestone, DonationDisplay display[Dona
 				char sound[PLATFORM_MAX_PATH];
 		
 				Format(sound, sizeof(sound), "misc/happy_birthday_tf_%02i.wav", GetRandomInt(1, 29));
-				EmitSoundToAll(sound, display[DDDigits][2]);
+				EmitSoundToAll(sound, display.digits[2]);
 			}
 
-			TE_Particle("bday_confetti", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display[DDDigits][1]);
+			TE_Particle("bday_confetti", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display.digits[1]);
 		}
 
 		case MilestoneType_100: //Play horn/cheers and spawn coins/notes
 		{
 			if(gSoundsCvar.BoolValue) {
-				EmitSoundToAll("passtime/horn_air2.wav", display[DDDigits][2]);
-				EmitSoundToAll("passtime/crowd_cheer.wav", display[DDDigits][2]);
+				EmitSoundToAll("passtime/horn_air2.wav", display.digits[2]);
+				EmitSoundToAll("passtime/crowd_cheer.wav", display.digits[2]);
 			}
 
-			TE_Particle("taunt_spy_cash", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display[DDDigits][1]);
-			TE_Particle("bday_balloon02", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display[DDDigits][1]);
+			TE_Particle("taunt_spy_cash", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display.digits[1]);
+			TE_Particle("bday_balloon02", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display.digits[1]);
 			SpawnProp(display, PropSpawnType_Coins);
 			SpawnProp(display, PropSpawnType_Notes);
 		}
@@ -825,38 +826,38 @@ public int HandleMilestone(MilestoneType milestone, DonationDisplay display[Dona
 		case MilestoneType_50: //Play mvm upgrade sound and spawn notes
 		{
 			if(gSoundsCvar.BoolValue) {
-				EmitSoundToAll("mvm/mvm_bought_upgrade.wav", display[DDDigits][2], SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, 0.6);
+				EmitSoundToAll("mvm/mvm_bought_upgrade.wav", display.digits[2], SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, 0.6);
 			}
 
-			TE_Particle("taunt_spy_cash", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display[DDDigits][1]);
+			TE_Particle("taunt_spy_cash", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display.digits[1]);
 			SpawnProp(display, PropSpawnType_Notes);
 		}
 
 		case MilestoneType_25: //Play mvm money sound and spawn coins
 		{
 			if(gSoundsCvar.BoolValue) {
-				EmitSoundToAll("mvm/mvm_money_pickup.wav", display[DDDigits][2], SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, 0.4);
+				EmitSoundToAll("mvm/mvm_money_pickup.wav", display.digits[2], SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, 0.4);
 			}
 
-			TE_Particle("taunt_spy_cash", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display[DDDigits][1]);
+			TE_Particle("taunt_spy_cash", NULL_VECTOR, NULL_VECTOR, NULL_VECTOR, display.digits[1]);
 			SpawnProp(display, PropSpawnType_Coins);
 		}
 	}
 }
 
-public int SpawnProp(DonationDisplay display[DonationDisplay], PropSpawnType type) {
+public int SpawnProp(DonationDisplay display, PropSpawnType type) {
 	if(!gPropsCvar.BoolValue) {
 		return;
 	}
 
-	if(display[DDNoProps] != false) {
+	if(display.noProps != false) {
 		return;
 	}
 
 	float position[3];
 	float rotation[3];
 
-	GetEntPropVector(display[DDDigits][1], Prop_Data, "m_vecAbsOrigin", position);
+	GetEntPropVector(display.digits[1], Prop_Data, "m_vecAbsOrigin", position);
 
 	int entity = CreateEntityByName("prop_physics_multiplayer");
 
@@ -879,7 +880,6 @@ public int SpawnProp(DonationDisplay display[DonationDisplay], PropSpawnType typ
 			return;
 	}
 
-
 	DispatchSpawn(entity);
 	TeleportEntity(entity, position, rotation, NULL_VECTOR);
 
@@ -897,8 +897,7 @@ public int InitProp(any entity) {
 	AcceptEntityInput(entity, "Break");
 }
 
-bool TF2_IsInvisible(int client)
-{
+bool TF2_IsInvisible(int client) {
 	return ((TF2_IsPlayerInCondition(client, TFCond_Cloaked) ||
 		TF2_IsPlayerInCondition(client, TFCond_DeadRingered) ||
 		TF2_IsPlayerInCondition(client, TFCond_Stealthed))

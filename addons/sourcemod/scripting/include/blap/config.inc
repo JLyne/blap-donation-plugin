@@ -39,16 +39,16 @@ stock void ParseMapConfig(KeyValues kv) {
 
 		kv.GetSectionName(keyName, sizeof(keyName));
 
-		ConfigEntry configEntry[ConfigEntry];
+		ConfigEntry configEntry;
 
 		kv.GotoFirstSubKey(false);
 		ParseEntityConfig(kv, configEntry);
 		kv.GoBack();
 
-		strcopy(configEntry[CETargetname], sizeof(configEntry[CETargetname]), keyName);
+		strcopy(configEntry.targetname, sizeof(configEntry.targetname), keyName);
 
 		//If entry is a regex then save as ConfigRegex
-		if(configEntry[CERegex]) {
+		if(configEntry.regex) {
 			RegexError errorType;
 			char error[64];
 			Regex regex = new Regex(keyName, 0, error, sizeof(error), errorType);
@@ -58,40 +58,40 @@ stock void ParseMapConfig(KeyValues kv) {
 				continue;
 			}
 
-			ConfigRegex configRegex[ConfigRegex];
-			configRegex[CRRegex] = regex;
-			strcopy(configRegex[CRConfigEntry], sizeof(configRegex[CRConfigEntry]), keyName);
+			ConfigRegex configRegex;
+			configRegex.regex = regex;
+			strcopy(configRegex.configEntry, sizeof(configRegex.configEntry), keyName);
 
-			gConfigRegexes.PushArray(configRegex[0]);
+			gConfigRegexes.PushArray(configRegex);
 		}
 
-		gConfigEntries.SetArray(keyName, configEntry[0], view_as<int>(ConfigEntry), true);
+		gConfigEntries.SetArray(keyName, configEntry, sizeof(ConfigEntry), true);
 	} while(kv.GotoNextKey(false));
 }
 
-stock void ParseEntityConfig(KeyValues kv, ConfigEntry configEntry[ConfigEntry]) {
+stock void ParseEntityConfig(KeyValues kv, ConfigEntry configEntry) {
 	do {
 		char keyName[50];
 
 		kv.GetSectionName(keyName, sizeof(keyName));
 
 		if(StrEqual(keyName, "hide", false)) {
-			configEntry[CEHide] = !!kv.GetNum(NULL_STRING, 1);
+			configEntry.hide = !!kv.GetNum(NULL_STRING, 1);
 			continue;
 		}
 
 		if(StrEqual(keyName, "noprops", false)) {
-			configEntry[CENoProps] = !!kv.GetNum(NULL_STRING, 1);
+			configEntry.noProps = !!kv.GetNum(NULL_STRING, 1);
 			continue;
 		}
 
 		if(StrEqual(keyName, "regex", false)) {
-			configEntry[CERegex] = !!kv.GetNum(NULL_STRING, 1);
+			configEntry.regex = !!kv.GetNum(NULL_STRING, 1);
 			continue;
 		}
 
 		if(StrEqual(keyName, "scale", false)) {
-			configEntry[CEScale] = kv.GetFloat(NULL_STRING, 1.0);
+			configEntry.scale = kv.GetFloat(NULL_STRING, 1.0);
 			continue;
 		}
 
@@ -100,9 +100,9 @@ stock void ParseEntityConfig(KeyValues kv, ConfigEntry configEntry[ConfigEntry])
 
 			kv.GetVector(NULL_STRING, position, NULL_VECTOR);
 
-			configEntry[CEPosition][0] = position[0];
-			configEntry[CEPosition][1] = position[1];
-			configEntry[CEPosition][2] = position[2];
+			configEntry.position[0] = position[0];
+			configEntry.position[1] = position[1];
+			configEntry.position[2] = position[2];
 
 			continue;
 		}
@@ -112,9 +112,9 @@ stock void ParseEntityConfig(KeyValues kv, ConfigEntry configEntry[ConfigEntry])
 
 			kv.GetVector(NULL_STRING, rotation, NULL_VECTOR);
 
-			configEntry[CERotation][0] = rotation[0];
-			configEntry[CERotation][1] = rotation[1];
-			configEntry[CERotation][2] = rotation[2];
+			configEntry.rotation[0] = rotation[0];
+			configEntry.rotation[1] = rotation[1];
+			configEntry.rotation[2] = rotation[2];
 
 			continue;
 		}
