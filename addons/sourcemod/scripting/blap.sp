@@ -18,7 +18,7 @@
 #define DUCK_PICKUP_PARTICLE "bday_confetti_colors"
 
 #define NO_SOCKET true
-#define FALLBACK_URL "https://blapbash.broadcast.tf/api/json_totals"
+#define FALLBACK_URL "https://donate.blapature.org/api/json_totals"
 
 public Plugin myinfo = 
 {
